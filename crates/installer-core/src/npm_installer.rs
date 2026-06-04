@@ -190,8 +190,11 @@ async fn fetch_npm_manifest(
 
 /// Download an asset via the mirror chain (first success wins) and verify SHA256.
 ///
-/// Same per-mirror timeout treatment as `fetch_npm_manifest` — see that
-/// function's docstring.
+/// Routes through `downloader::download_to_file`, so each mirror gets the same
+/// resume / same-mirror-retry / body-idle-timeout treatment as the native
+/// binary download — a tarball that drops near the tail resumes on the same
+/// proxy instead of restarting on the next one. Progress is dropped (npm
+/// tarballs have no UI progress bar), hence `noop_progress`.
 async fn download_asset(
     client: &reqwest::Client,
     mirrors: &MirrorList,
@@ -203,28 +206,25 @@ async fn download_asset(
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+    let progress = crate::progress::noop_progress();
     for m in &mirrors.mirrors {
         let url = match m {
             Mirror::GhRelease { .. } => m.asset_url(version, asset),
             Mirror::Upstream { .. } => continue,
         };
         tracing::info!("download {} via {}: {}", asset, m.name(), url);
-        match downloader::send_with_timeout(client, &url).await {
-            Ok(resp) => match resp.bytes().await {
-                Ok(bytes) => {
-                    if let Err(e) = tokio::fs::write(dest, &bytes).await {
-                        tracing::warn!("write {} failed: {}", dest.display(), e);
-                        continue;
-                    }
-                    if verifier::verify(dest, expected_sha256).await.is_ok() {
-                        return Ok(());
-                    }
-                    tracing::warn!("checksum mismatch for {} via {}", asset, m.name());
-                    let _ = tokio::fs::remove_file(dest).await;
+        match downloader::download_to_file(client, &progress, "npm", m.name(), &url, dest).await {
+            Ok(_) => {
+                if verifier::verify(dest, expected_sha256).await.is_ok() {
+                    return Ok(());
                 }
-                Err(e) => tracing::warn!("read body {} via {}: {}", asset, m.name(), e),
-            },
-            Err(e) => tracing::warn!("fetch {} via {}: {}", asset, m.name(), e),
+                tracing::warn!("checksum mismatch for {} via {}", asset, m.name());
+                let _ = tokio::fs::remove_file(dest).await;
+            }
+            Err(e) => {
+                tracing::warn!("fetch {} via {}: {}", asset, m.name(), e);
+                let _ = tokio::fs::remove_file(dest).await;
+            }
         }
     }
     Err(AppError::AllMirrorsFailed)

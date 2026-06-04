@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-04
+
+### 下载断点续传 + 同镜像重试 + body 空闲超时
+
+用户反馈：二进制「本来快下好了，然后又突然换线路重新下载」，进度条归零重来。复盘根因在 `downloader::download_to_file`——`send_with_timeout` 只给「拿响应头」阶段加了 8s 超时，body stream 是无超时裸跑的（v0.4.1 的注释明确写了「不打断慢网络下的大文件」）。问题是免费 GH 代理（gh-proxy.com / ghfast.top / fastgit.cc 等）有个通病：大文件下到**尾部**容易被代理主动断流，此时 `stream.next()` 返回 `Some(Err(..))`，`chunk?` 把错误抛出去 → 外层 `claude_code.rs` / `codex.rs` 的换镜像 for 循环把 partial 文件删掉 → 跳到下一条线**从第 0 字节重下**。三个缺口：没有同镜像重试、没有断点续传、body 卡住不动时（连上但不发数据）反而永远不切。这版把三件事全部内聚进 `download_to_file` 一个函数，两个工具的外层换镜像循环一行没动——它们现在只在某条线真正重试耗尽后才切线。
+
+### 修复
+
+- **`downloader::download_to_file` 重写为带续传的重试循环**（`crates/installer-core/src/downloader.rs`）：
+  - **断点续传**：流中断后用 `Range: bytes=N-` 重连。服务器回 `206 Partial Content` 就 `OpenOptions::append` 续写、保留已下部分；服务器忽略 Range 回 `200` 就透明降级、`File::create` 截断从 0 重来。`total` 进度按「已下 + 剩余」还原成完整文件大小，进度条不会因 206 的 Content-Length 是剩余长度而错乱
+  - **同镜像重试**：同一条线最多 `MAX_ATTEMPTS = 4` 次，递增退避（`300ms × attempt`）。但**只在本轮有进度时才续传重试**（`downloaded > 0`）——某条线 0 字节就掉线判定为死线，立刻 return 交还外层换下一个镜像，不在死线上耗时间
+  - **body 空闲超时**：每个 chunk 读取包 `BODY_IDLE_TIMEOUT = 30s`（`tokio::time::timeout(.., stream.next())`），连上但闷着不发数据的代理会被判死并触发续传，补上「卡住不动也不切」的另一半
+  - 连接级失败（`send()` 报错 / 拿响应头超时）直接 return，不在不可达镜像上烧重试次数
+
+### 改动
+
+- **npm 路径接入同一套续传逻辑**（`crates/installer-core/src/npm_installer.rs::download_asset`）：原来走 `send_with_timeout` + `resp.bytes()` 一次性读进内存、断流即失败换线；现在路由进 `download_to_file`（配 `noop_progress`，npm tarball 无 UI 进度条），`.tgz` 下到尾部断流也能在同一代理上续传而非换线重来
+
+### 内部
+
+- `send_with_timeout` 保留不变，仍供 `fetch_npm_manifest` 等「小 JSON 一次性读」的调用方使用
+- 外层换镜像循环（`claude_code.rs` / `codex.rs::install_native`）签名与逻辑零改动——续传/重试对它们透明，只是「单镜像失败」的语义从「掉一次就弃」变成「重试耗尽才弃」
+
 ## [0.4.2] - 2026-05-25
 
 ### Claude Code native 安装 self-install 失败兜底
