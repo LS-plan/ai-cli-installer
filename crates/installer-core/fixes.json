@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "updated_at": "2026-07-07",
-  "comment": "Built-in fix recipes from OCC docs (https://docs.openclaudecode.cn) and Claude Code docs (https://code.claude.com/docs/en/settings). Each fix is a list of patches that get merged into ~/.claude/settings.json or ~/.claude.json.",
+  "updated_at": "2026-07-08",
+  "comment": "Built-in fix recipes from OCC docs (https://docs.micuapi.ai) and Claude Code docs (https://code.claude.com/docs/en/settings). Each fix is a list of patches that get merged into ~/.claude/settings.json or ~/.claude.json.",
   "fixes": [
     {
       "id": "cc-006-disable-betas",
       "code": "CC-006",
       "title": "禁用实验性 Beta 参数",
       "description": "AWS 分组上游不接受 anthropic-beta 请求头，会返回 400 invalid beta flag。开启后 Claude Code 不再附加该头。副作用：官方直连时会失去依赖 beta 头的实验功能（如部分长上下文能力）。",
-      "doc_url": "https://docs.openclaudecode.cn/#/errors/cc-400-experimental-betas",
+      "doc_url": "https://docs.micuapi.ai/errors/cc-400-experimental-betas",
       "tags": ["推荐"],
       "patches": [
         {
@@ -23,7 +23,7 @@
       "code": "CC-017",
       "title": "跳过 WebFetch 预检（国内网络强烈推荐）",
       "description": "WebFetch 抓页面前会先请求 claude.ai 做域名预检；国内网络/防火墙拦掉后整个 WebFetch 失效。开启后跳过预检，直接抓目标页面。副作用：失去官方预检对目标域名的过滤，抓取内容安全性完全取决于目标站点。",
-      "doc_url": "https://docs.openclaudecode.cn/#/errors/cc-webfetch-preflight-fail",
+      "doc_url": "https://docs.micuapi.ai/errors/cc-webfetch-preflight-fail",
       "tags": ["国内网络推荐"],
       "patches": [
         {
@@ -38,7 +38,7 @@
       "code": "CC-005",
       "title": "标记 Onboarding 已完成（绕过首次启动连通性校验）",
       "description": "Claude Code 首次启动会向 api.anthropic.com 做连通性校验，不受中转地址影响，国内/中转用户被卡在登录前。该字段写入 ~/.claude.json 跳过此校验。副作用：跳过校验后若 API 配置有误，问题会推迟到实际对话时才暴露。",
-      "doc_url": "https://docs.openclaudecode.cn/#/errors/cc-onboarding-connection-block",
+      "doc_url": "https://docs.micuapi.ai/errors/cc-onboarding-connection-block",
       "tags": ["推荐"],
       "patches": [
         {
